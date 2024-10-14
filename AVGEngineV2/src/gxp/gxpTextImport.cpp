@@ -4,7 +4,7 @@
 
 #include <chrono>
 
-void UpdateScenarioByOrigScript(const std::wstring_view origScript,const std::wstring_view scePath,const std::wstring_view newScript)
+void UpdateScenarioByOrigScript(const std::wstring_view& origScript,const std::wstring_view& scePath,const std::wstring_view& newScript)
 {
 	GxpScriptUpdater updater(origScript, newScript);
 

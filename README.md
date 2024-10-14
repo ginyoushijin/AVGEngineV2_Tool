@@ -1,6 +1,8 @@
 # AVGEngineV2_Tool  
 
-还有很多需要优化的地方  
-实现基于对《あおぞらストライプ》(ver 1.2.7.0)的分析  
-引擎估计是从2.0开始换了脚本结构，所以导出/入文本的功能应该只适用与2.0之前的版本  
-另外暂时只实现了对utf8的支持  
+The tool is a galgame engine unpack/pack tool for AVGEngine V2 (and GxEngine V3)  
+GxEngine V3 archive format same as AVGEngine V2, but I can't guarantee full compatibility  
+In fact,only one SLG (シロウト家出娘と俺) uses this engine for all i know
+So,compatibility can't be fully guaranteed  
+The engine's script file is called moacode.mwb, but the format of the old version (V1.0) differs from later versions  
+The tool only extracts scenarios from the old version, for example, games like `えれくと！` and `あおぞらストライプ`  

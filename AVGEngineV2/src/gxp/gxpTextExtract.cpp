@@ -5,7 +5,7 @@
 #include <ShlObj.h>
 #include <chrono>
 
-void ExtractScenarioFromScript(const std::wstring_view script,const std::wstring_view extractPath)
+void ExtractScenarioFromScript(const std::wstring_view& script,const std::wstring_view& extractPath)
 {
 	SHCreateDirectoryExW(NULL,extractPath.data(),nullptr);
 

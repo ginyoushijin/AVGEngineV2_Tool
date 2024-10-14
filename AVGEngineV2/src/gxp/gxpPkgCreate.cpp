@@ -10,6 +10,7 @@
 #include <list>
 #include <chrono>
 #include <future>
+#include <functional>
 
 struct FileInfo
 {
@@ -18,7 +19,7 @@ struct FileInfo
 	uint64_t size;
 };
 
-std::list<FileInfo> GetDirFileInfo(const std::wstring_view targetDir, const std::wstring_view whiteList)
+std::list<FileInfo> GetDirFileInfo(const std::wstring_view& targetDir, const std::wstring_view whiteList)
 {
 	std::list <FileInfo> files;
 	std::wstring filter;
@@ -98,7 +99,7 @@ struct ImportEntry
 	wchar_t relativePath[_MAX_PATH]{ 0 };
 };
 
-void CreateGxpArchiveImportResources(const std::wstring_view resPath, const std::wstring_view createArchive, bool encryptFlag)
+void CreateGxpArchiveImportResources(const std::wstring_view& resPath, const std::wstring_view& createArchive, bool encryptFlag,ArchiveVersion archiveVersion)
 {
 	std::list<FileInfo> fileinfoSet = GetDirFileInfo(resPath, L"*.*");
 
@@ -123,8 +124,31 @@ void CreateGxpArchiveImportResources(const std::wstring_view resPath, const std:
 	archive.write(c_archiveHeader, sizeof(c_archiveHeader));	//写入文件头
 
 	GxpArchiveInfo archiveInfo;
+	std::function<void(uint8_t* const, const uint32_t, const uint32_t)> dataTranformFunc;
 
-	if (encryptFlag) archiveInfo.encryptFlag = FALSE;
+	if (encryptFlag) 
+	{
+		archiveInfo.encryptFlag = TRUE;
+		archiveInfo.archiveVersion = archiveVersion;
+		switch(archiveVersion)
+		{
+			case ArchiveVersion::V2:
+			{
+				dataTranformFunc = DataTransformV2;
+				break;
+			}
+			case ArchiveVersion::V3:
+			{
+				dataTranformFunc = std::bind(DataTransfromV3, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3,UnicodeToAnsi(createArchive.substr(createArchive.find_last_of(L'\\')+1), CP_ACP));
+				break;
+			}
+			default:
+			{
+				printf("please select entryption method\n");
+				return;
+			}
+		}
+	}
 
 	archive.write(reinterpret_cast<char*>(&archiveInfo), sizeof(archiveInfo));	//封包信息占位
 
@@ -161,8 +185,8 @@ void CreateGxpArchiveImportResources(const std::wstring_view resPath, const std:
 
 		if(encryptFlag)	//数据加密
 		{
-			DataTransform(reinterpret_cast<uint8_t*>(&importEntry), entryRealSize, 0);
-			DataTransform(reinterpret_cast<uint8_t*>(dataBuffer.data()), dataBuffer.size(), 0);
+			dataTranformFunc(reinterpret_cast<uint8_t*>(&importEntry), entryRealSize, 0);
+			dataTranformFunc(reinterpret_cast<uint8_t*>(dataBuffer.data()), dataBuffer.size(), 0);
 		}
 
 		archive.write(reinterpret_cast<char*>(&importEntry), entryRealSize);	//写入文件项info

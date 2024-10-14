@@ -14,11 +14,17 @@ union SizeVar
 	uint64_t size64 = 0;
 };
 
+enum ArchiveVersion 
+{
+	V2 = 0x64,
+	V3 = 0x65,
+};
+
 #pragma pack(push,4)
 
 struct GxpArchiveInfo
 {
-	uint32_t unknowInfo1{ 0x64 };
+	ArchiveVersion  archiveVersion{ ArchiveVersion::V2 };
 	uint32_t unknowInfo2{ 0x10203040 };
 	uint32_t enableFlag{ TRUE };
 	uint32_t unknowInfo3 {0};

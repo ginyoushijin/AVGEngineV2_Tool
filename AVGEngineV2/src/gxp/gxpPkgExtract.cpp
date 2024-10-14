@@ -11,6 +11,7 @@
 #include <future>
 #include <chrono>
 #include <list>
+#include <functional>
 
 struct ExtractEntry
 {
@@ -18,7 +19,7 @@ struct ExtractEntry
 	wchar_t* name;
 };
 
-static std::ifstream OpenGxpArchive(const std::wstring_view target)
+static std::ifstream OpenGxpArchive(const std::wstring_view& target)
 {
 	std::ifstream archive{ target.data(),std::ios::binary | std::ios::in };
 
@@ -39,7 +40,7 @@ static std::ifstream OpenGxpArchive(const std::wstring_view target)
 
 }
 
-static void GetExtarctSetInEncrypt(std::vector<ExtractEntry>& set, uint8_t* const initAdress)
+static void GetExtarctSetInEncrypt(std::vector<ExtractEntry>& set, uint8_t* const initAdress, const std::function<void(uint8_t*, uint32_t, uint32_t)>& DataTransformFunc)
 {
 	uint8_t* entryAdress = initAdress;
 
@@ -47,9 +48,9 @@ static void GetExtarctSetInEncrypt(std::vector<ExtractEntry>& set, uint8_t* cons
 	{
 		set[i].info = reinterpret_cast<GxpContentsEntryInfo const*>(entryAdress);
 		set[i].name = reinterpret_cast<wchar_t*>(entryAdress + sizeof(GxpContentsEntryInfo));
-		DataTransform(entryAdress, 4, 0);
+		DataTransformFunc(entryAdress, 4, 0);
 		entrySize = *reinterpret_cast<uint32_t const*>(entryAdress);
-		DataTransform(entryAdress + 4, entrySize - 4, 4);
+		DataTransformFunc(entryAdress + 4, entrySize - 4, 4);
 		entryAdress += entrySize;
 	}
 }
@@ -66,7 +67,7 @@ static void GetExtractSetInUnEncrypt(std::vector<ExtractEntry>& set, uint8_t* co
 	}
 }
 
-uint32_t ExtractResourceTask(std::vector<ExtractEntry>::iterator iterator, const uint32_t estGoal, const uint32_t baseOffset, const std::wstring_view target, bool encryptFlag, const std::wstring_view extractPath)
+uint32_t ExtractResourceTask(std::vector<ExtractEntry>::iterator iterator, const uint32_t estGoal, const uint32_t baseOffset, const std::wstring_view& target, bool encryptFlag, const std::wstring_view& extractPath, const std::function<void(uint8_t*, uint32_t, uint32_t)>& DataTransform)
 {
 	uint32_t extractCount = 0;
 	std::vector<uint8_t> buffer;
@@ -85,9 +86,9 @@ uint32_t ExtractResourceTask(std::vector<ExtractEntry>::iterator iterator, const
 
 	fileFullPath.reserve(extractPath.length() + 1);
 	fileFullPath.append(extractPath);
-	fileFullPath.push_back(L'\\');
+	if (extractPath[extractPath.size() - 1] != '\\') fileFullPath.push_back(L'\\');
 
-	const uint32_t nameSectionPos = fileFullPath.rfind(L'\\') + 1;
+	const uint32_t nameSectionPos = fileFullPath.length();
 
 	for (uint32_t i = 0; i < estGoal; ++i, ++iterator)
 	{
@@ -119,7 +120,7 @@ uint32_t ExtractResourceTask(std::vector<ExtractEntry>::iterator iterator, const
 	return extractCount;
 }
 
-void ExtractResourcesFromGxpArchive(const std::wstring_view target, const std::wstring_view exPath)
+void ExtractResourcesFromGxpArchive(const std::wstring_view& target, const std::wstring_view& exPath)
 {
 	std::ifstream archive = OpenGxpArchive(target);
 
@@ -140,10 +141,32 @@ void ExtractResourcesFromGxpArchive(const std::wstring_view target, const std::w
 	archive.read(reinterpret_cast<char*>(contentsBuffer.data()), archiveInfo.contentsSize);
 
 	std::vector<ExtractEntry> extractSet(archiveInfo.entryCount);
+	std::function<void(uint8_t* const, const uint32_t, const uint32_t)> dataTranformFunc;
 
 	if (archiveInfo.encryptFlag)
 	{
-		GetExtarctSetInEncrypt(extractSet, contentsBuffer.data());
+
+		switch (archiveInfo.archiveVersion)
+		{
+			case ArchiveVersion::V2:
+			{
+				dataTranformFunc = DataTransformV2;
+				break;
+			}
+			case ArchiveVersion::V3:
+			{
+				dataTranformFunc = std::bind(DataTransfromV3, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, UnicodeToAnsi(target.substr(target.find_last_of(L'\\') + 1), CP_ACP));
+				break;
+			}
+			default:
+			{
+				printf("ERROR : the archive is an unknow version\n");
+				return;
+			}
+		}
+
+		GetExtarctSetInEncrypt(extractSet, contentsBuffer.data(), dataTranformFunc);
+
 	}
 	else
 	{
@@ -155,7 +178,7 @@ void ExtractResourcesFromGxpArchive(const std::wstring_view target, const std::w
 	uint32_t extractCount = 0;
 	const uint32_t maxThread = std::thread::hardware_concurrency();
 
-	if (archiveInfo.entryCount > maxThread*0xF)
+	if (archiveInfo.entryCount > maxThread * 0x10)
 	{
 		std::list<std::future<uint32_t>> tasks;
 
@@ -165,10 +188,10 @@ void ExtractResourcesFromGxpArchive(const std::wstring_view target, const std::w
 
 		for (uint32_t i = 0; i < maxThread; ++i)
 		{
-			uint32_t threadLoad = std::min(remainingTask, threadMaxTask);
-			auto  task = std::async(std::launch::async, ExtractResourceTask, iter, threadLoad, archiveInfo.infoSectionSize.size32, target, archiveInfo.encryptFlag, exPath);
-			remainingTask -= threadLoad;
-			iter += threadLoad;
+			uint32_t threadLoadCount = std::min(remainingTask, threadMaxTask);
+			auto  task = std::async(std::launch::async, ExtractResourceTask, iter, threadLoadCount, archiveInfo.infoSectionSize.size32, target, archiveInfo.encryptFlag, exPath, dataTranformFunc);
+			remainingTask -= threadLoadCount;
+			iter += threadLoadCount;
 			tasks.emplace_back(std::move(task));
 		}
 
@@ -179,7 +202,7 @@ void ExtractResourcesFromGxpArchive(const std::wstring_view target, const std::w
 	}
 	else
 	{
-		extractCount = ExtractResourceTask(extractSet.begin(), archiveInfo.entryCount, archiveInfo.infoSectionSize.size32, target, archiveInfo.encryptFlag, exPath);
+		extractCount = ExtractResourceTask(extractSet.begin(), archiveInfo.entryCount, archiveInfo.infoSectionSize.size32, target, archiveInfo.encryptFlag, exPath, dataTranformFunc);
 	}
 
 	auto watchOfEnd = std::chrono::steady_clock::now();
